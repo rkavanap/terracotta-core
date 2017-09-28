@@ -29,6 +29,7 @@ import com.tc.object.EntityClientEndpointImpl;
 import com.tc.object.EntityDescriptor;
 import com.tc.object.EntityID;
 import com.tc.object.InFlightMessage;
+import com.tc.object.LocalCallback;
 import com.tc.object.msg.ClientHandshakeMessage;
 import com.tc.object.tx.TransactionID;
 import com.tc.text.PrettyPrinter;
@@ -46,6 +47,8 @@ import org.terracotta.entity.EntityResponse;
 import org.terracotta.entity.InvokeFuture;
 import org.terracotta.entity.MessageCodec;
 import org.terracotta.exception.EntityException;
+
+import javax.naming.OperationNotSupportedException;
 
 /**
  *
@@ -149,6 +152,11 @@ public class DiagnosticClientEntityManager implements ClientEntityManager {
   @Override
   public InvokeFuture<byte[]> invokeActionWithTimeout(EntityDescriptor entityDescriptor, Set<Acks> acks, boolean requiresReplication, boolean shouldBlockGetOnRetire, long invokeTimeout, TimeUnit units, byte[] payload) throws InterruptedException, TimeoutException {
     return invokeAction(entityDescriptor, acks, requiresReplication, shouldBlockGetOnRetire, payload);
+  }
+
+  @Override
+  public void invokeActionWithCallback(EntityDescriptor entityDescriptor, boolean requiresReplication, boolean shouldBlockGetOnRetire, byte[] payload, LocalCallback callback) {
+    throw new RuntimeException("Not implemented");
   }
 
   private DiagnosticMessage createMessage(byte[] config) {

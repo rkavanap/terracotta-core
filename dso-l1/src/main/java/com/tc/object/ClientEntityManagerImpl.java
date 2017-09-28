@@ -317,6 +317,18 @@ public class ClientEntityManagerImpl implements ClientEntityManager {
   }
 
   @Override
+  public void invokeActionWithCallback(EntityDescriptor entityDescriptor, boolean requiresReplication, boolean shouldBlockOnRetire, byte[] payload, LocalCallback callback) {
+    Set<VoltronEntityMessage.Acks> requestedAcks = EnumSet.noneOf(VoltronEntityMessage.Acks.class);
+    NetworkVoltronEntityMessage message = createMessageWithDescriptor(entityDescriptor, requiresReplication, payload, VoltronEntityMessage.Type.INVOKE_ACTION,
+        requestedAcks);
+    Trace trace = Trace.newTrace(message, "ClientEntityManagerImpl.invokeAction");
+    trace.start();
+    queueInFlightMessageWithCallback(message, shouldBlockOnRetire, callback);
+    trace.end();
+    return;
+  }
+
+  @Override
   public InvokeFuture<byte[]> invokeAction(EntityDescriptor entityDescriptor, Set<VoltronEntityMessage.Acks> requestedAcks, boolean requiresReplication, boolean shouldBlockGetOnRetire, byte[] payload) {
     NetworkVoltronEntityMessage message = createMessageWithDescriptor(entityDescriptor, requiresReplication, payload, VoltronEntityMessage.Type.INVOKE_ACTION, requestedAcks);
     Trace trace = Trace.newTrace(message, "ClientEntityManagerImpl.invokeAction");
@@ -579,6 +591,14 @@ public class ClientEntityManagerImpl implements ClientEntityManager {
   private InFlightMessage queueInFlightMessage(NetworkVoltronEntityMessage message, Set<VoltronEntityMessage.Acks> requestedAcks, boolean shouldBlockGetOnRetire) {
     InFlightMessage inFlight = new InFlightMessage(message, requestedAcks, shouldBlockGetOnRetire);
     
+    // NOTE:  If we are already shutdown, the handler in outbound will fail this message for us.
+    outbound.addSingleThreaded(inFlight);
+    return inFlight;
+  }
+
+  private InFlightMessage queueInFlightMessageWithCallback(NetworkVoltronEntityMessage message, boolean shouldBlockOnRetire, LocalCallback callback) {
+    InFlightMessage inFlight = new InFlightMessage(message, shouldBlockOnRetire, callback);
+
     // NOTE:  If we are already shutdown, the handler in outbound will fail this message for us.
     outbound.addSingleThreaded(inFlight);
     return inFlight;

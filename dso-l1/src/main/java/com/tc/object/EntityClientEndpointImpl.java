@@ -23,6 +23,7 @@ import org.terracotta.entity.EndpointDelegate;
 import org.terracotta.entity.EntityClientEndpoint;
 import org.terracotta.entity.InvocationBuilder;
 import org.terracotta.entity.InvokeFuture;
+import org.terracotta.entity.MessageCallback;
 import org.terracotta.entity.MessageCodec;
 import org.terracotta.entity.EntityMessage;
 import org.terracotta.entity.EntityResponse;
@@ -217,6 +218,16 @@ public class EntityClientEndpointImpl<M extends EntityMessage, R extends EntityR
       invoked = true;
       return returnTypedInvoke(invocationHandler.invokeAction(invokeDescriptor, this.acks, this.requiresReplication, this.shouldBlockGetOnRetire, codec.encodeMessage(request)));
       
+    }
+
+    @Override
+    public synchronized void invokeWithCallBack(MessageCallback<R> messageCallBack) throws MessageCodecException {
+      checkInvoked();
+      invoked = true;
+      LocalCallback callback = new LocalMessageCallback<M, R>(messageCallBack, codec);
+      invocationHandler.invokeActionWithCallback(invokeDescriptor, this.requiresReplication,
+          this.shouldBlockGetOnRetire,
+          codec.encodeMessage(request), callback);
     }
 
     private void checkInvoked() {

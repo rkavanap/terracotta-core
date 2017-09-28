@@ -21,6 +21,7 @@ package com.tc.object;
 import org.terracotta.entity.InvokeFuture;
 import org.terracotta.exception.EntityException;
 
+import com.tc.entity.NetworkVoltronEntityMessage;
 import com.tc.tracing.Trace;
 import com.tc.entity.VoltronEntityMessage;
 import com.tc.net.protocol.tcm.TCMessage;
@@ -61,6 +62,7 @@ public class InFlightMessage implements InvokeFuture<byte[]> {
   private boolean getCanComplete;
   private final boolean blockGetOnRetired;
   private final Trace trace;
+  private final LocalCallback callback;
 
   public InFlightMessage(VoltronEntityMessage message, Set<VoltronEntityMessage.Acks> acks, boolean shouldBlockGetOnRetire) {
     this.message = message;
@@ -71,6 +73,18 @@ public class InFlightMessage implements InvokeFuture<byte[]> {
     // We always assume that we can set the result, the first time.
     this.canSetResult = true;
     this.trace = Trace.newTrace(message, "InFlightMessage");
+    this.callback = null;
+  }
+
+  public InFlightMessage(VoltronEntityMessage message, boolean shouldBlockGetOnRetire, LocalCallback callback) {
+    this.message = message;
+    this.pendingAcks = EnumSet.noneOf(VoltronEntityMessage.Acks.class);
+    this.waitingThreads = new HashSet<Thread>();
+    this.blockGetOnRetired = shouldBlockGetOnRetire;
+    // We always assume that we can set the result, the first time.
+    this.canSetResult = true;
+    this.trace = Trace.newTrace(message, "InFlightMessage");
+    this.callback = callback;
   }
 
   /**
@@ -202,35 +216,60 @@ public class InFlightMessage implements InvokeFuture<byte[]> {
     }
   }
 
-  public synchronized void setResult(byte[] value, EntityException error) {
-    trace.log("Received Result: " + value + " ; Exception: " + (error != null ? error.getLocalizedMessage() : "None"));
-    this.pendingAcks.remove(VoltronEntityMessage.Acks.COMPLETED);
-    if (error != null) {
-      Assert.assertNull(value);
-      this.pendingAcks.clear();
-      this.exception = error;
-      this.getCanComplete = true;
-      notifyAll();
-    } else {
-      Assert.assertNull(error);
-      if (this.canSetResult) {
-        this.value = value;
-        if (!this.blockGetOnRetired) {
-          this.getCanComplete = true;
-          notifyAll();
+  public void setResult(byte[] value, EntityException error) {
+    boolean signalError = false;
+    boolean signalCompletion = false;
+    synchronized (this) {
+      trace.log("Received Result: " + value + " ; Exception: " + (error != null ? error.getLocalizedMessage() : "None"));
+      this.pendingAcks.remove(VoltronEntityMessage.Acks.COMPLETED);
+      if (error != null) {
+        Assert.assertNull(value);
+        this.pendingAcks.clear();
+        this.exception = error;
+        this.getCanComplete = true;
+        if (callback != null) {
+          signalError = true;
         }
-        // Determine if this can be over-written - only if we are waiting for the retired.
-        this.canSetResult = this.blockGetOnRetired;
+        notifyAll();
+      } else {
+        Assert.assertNull(error);
+        if (this.canSetResult) {
+          this.value = value;
+          if (!this.blockGetOnRetired) {
+            this.getCanComplete = true;
+            if (callback != null) {
+              signalCompletion = true;
+            }
+            notifyAll();
+          }
+          // Determine if this can be over-written - only if we are waiting for the retired.
+          this.canSetResult = this.blockGetOnRetired;
+        }
       }
+    }
+    if (signalCompletion) {
+      callback.onCompletion(value);
+    }
+    if (signalError) {
+      callback.onError(exception);
     }
   }
 
-  public synchronized void retired() {
-    trace.log("Received ACK: " + VoltronEntityMessage.Acks.RETIRED);
-    this.pendingAcks.remove(VoltronEntityMessage.Acks.RETIRED);
-    if (this.blockGetOnRetired) {
-      this.getCanComplete = true;
+  public void retired() {
+    boolean signal = false;
+    synchronized (this) {
+      trace.log("Received ACK: " + VoltronEntityMessage.Acks.RETIRED);
+      this.pendingAcks.remove(VoltronEntityMessage.Acks.RETIRED);
+      if (this.blockGetOnRetired) {
+        this.getCanComplete = true;
+        if (callback != null) {
+          signal = true;
+        }
+      }
+      notifyAll();
     }
-    notifyAll();
+    if (signal) {
+      callback.onCompletion(value);
+    }
   }
 }
